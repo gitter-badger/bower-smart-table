@@ -1,4 +1,4 @@
-/* Column module */
+/* Column module  */
 
 var smartTableColumnModule = angular.module('smartTable.column', ['smartTable.templateUrlList']).constant('DefaultColumnConfiguration', {
     isSortable: true,
