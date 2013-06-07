@@ -1,0 +1,11 @@
+{
+    "author": {
+        "name": "https://github.com/lorenzofox3/Smart-Table"
+    },
+    "dependencies": {
+        "angular": ">=1.0.7"
+    },
+    "name": "smart-table",
+    "version": "0.1.0",
+    "main": "Smart-Table.min.js"
+}
