@@ -38,7 +38,7 @@
         this.setDefaultOption(DefaultColumnConfiguration);
 
         this.$get = function () {
-            return Column;
+             return Column;
         };
     }
 
