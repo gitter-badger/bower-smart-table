@@ -57,7 +57,7 @@
     angular.module('smartTable.directives', ['smartTable.templateUrlList', 'smartTable.templates'])
         .directive('smartTable', ['templateUrlList', 'DefaultTableConfiguration', function (templateList, defaultConfig) {
             return {
-                restrict: 'E',
+                restrict: 'EA',
                 scope: {
                     columnCollection: '=columns',
                     dataCollection: '=rows',
@@ -197,7 +197,7 @@
         }])
         //a customisable cell (see templateUrl) and editable
         //TODO check with the ng-include strategy
-        .directive('smartTableDataCell', ['$filter', '$http', '$templateCache', '$compile', function (filter, http, templateCache, compile) {
+        .directive('smartTableDataCell', ['$filter', '$http', '$templateCache', '$compile', '$parse', function (filter, http, templateCache, compile, parse) {
             return {
                 restrict: 'C',
                 link: function (scope, element) {
@@ -205,15 +205,16 @@
                         column = scope.column,
                         row = scope.dataRow,
                         format = filter('format'),
+                        getter = parse(column.map),
                         childScope;
 
                     //can be useful for child directives
-                    scope.formatedValue = format(row[column.map], column.formatFunction, column.formatParameter);
+                    scope.formatedValue = format(getter(row), column.formatFunction, column.formatParameter);
 
                     function defaultContent() {
                         //clear content
                         if (column.isEditable) {
-                            element.html('<editable-cell row="dataRow" column="column" type="column.type" value="dataRow[column.map]"></editable-cell>');
+                            element.html('<div editable-cell="" row="dataRow" column="column" type="column.type"></div>');
                             compile(element.contents())(scope);
                         } else {
                             element.text(scope.formatedValue);
@@ -241,22 +242,21 @@
             };
         }])
         //directive that allows type to be bound in input
-        .directive('inputType', ['$parse', function (parse) {
+        .directive('inputType', function () {
             return {
                 restrict: 'A',
                 priority: 1,
                 link: function (scope, ielement, iattr) {
                     //force the type to be set before inputDirective is called
-                    var getter = parse(iattr.type),
-                        type = getter(scope);
+                    var type = scope.$eval(iattr.type);
                     iattr.$set('type', type);
                 }
             };
-        }])
+        })
         //an editable content in the context of a cell (see row, column)
-        .directive('editableCell', ['templateUrlList', function (templateList) {
+        .directive('editableCell', ['templateUrlList', '$parse', function (templateList, parse) {
             return {
-                restrict: 'E',
+                restrict: 'EA',
                 require: '^smartTable',
                 templateUrl: templateList.editableCell,
                 scope: {
@@ -267,23 +267,26 @@
                 replace: true,
                 link: function (scope, element, attrs, ctrl) {
                     var form = angular.element(element.children()[1]),
-                        input = angular.element(form.children()[0]);
+                        input = angular.element(form.children()[0]),
+                        getter = parse(scope.column.map);
 
                     //init values
                     scope.isEditMode = false;
+                    scope.value = getter(scope.row);
+
 
                     scope.submit = function () {
                         //update model if valid
                         if (scope.myForm.$valid === true) {
-                            ctrl.updateDataRow(scope.row,scope.column.map,scope.value);
+                            ctrl.updateDataRow(scope.row, scope.column.map, scope.value);
                             ctrl.sortBy();//it will trigger the refresh...  (ie it will sort, filter, etc with the new value)
                         }
-                        scope.isEditMode = false;
+                        scope.toggleEditMode();
                     };
 
                     scope.toggleEditMode = function () {
-                        scope.value = scope.row[scope.column.map];
-                        scope.isEditMode = true;
+                        scope.value = getter(scope.row);
+                        scope.isEditMode = scope.isEditMode !== true;
                     };
 
                     scope.$watch('isEditMode', function (newValue, oldValue) {
@@ -330,7 +333,7 @@
 
 (function (angular) {
     "use strict";
-    angular.module('smartTable.table', ['smartTable.column', 'smartTable.utilities', 'smartTable.directives', 'smartTable.filters', 'ui.bootstrap.pagination'])
+    angular.module('smartTable.table', ['smartTable.column', 'smartTable.utilities', 'smartTable.directives', 'smartTable.filters', 'ui.bootstrap.pagination.smartTable'])
         .constant('DefaultTableConfiguration', {
             selectionMode: 'none',
             isGlobalSearchActivated: false,
@@ -343,7 +346,7 @@
             sortAlgorithm: '',
             filterAlgorithm: ''
         })
-        .controller('TableCtrl', ['$scope', 'Column', '$filter', 'ArrayUtility', 'DefaultTableConfiguration', function (scope, Column, filter, arrayUtility, defaultConfig) {
+        .controller('TableCtrl', ['$scope', 'Column', '$filter', '$parse', 'ArrayUtility', 'DefaultTableConfiguration', function (scope, Column, filter, parse, arrayUtility, defaultConfig) {
 
             scope.columns = [];
             scope.dataCollection = scope.dataCollection || [];
@@ -573,11 +576,13 @@
              */
             this.updateDataRow = function (dataRow, propertyName, newValue) {
                 var index = scope.displayedCollection.indexOf(dataRow),
+                    getter = parse(propertyName),
+                    setter = getter.assign,
                     oldValue;
                 if (index !== -1) {
-                    oldValue = scope.displayedCollection[index][propertyName];
+                    oldValue = getter(scope.displayedCollection[index]);
                     if (oldValue !== newValue) {
-                        scope.displayedCollection[index][propertyName] = newValue;
+                        setter(scope.displayedCollection[index], newValue);
                         scope.$emit('updateDataRow', {item: scope.displayedCollection[index]});
                     }
                 }
@@ -594,7 +599,7 @@ angular.module('smartTable.templates', ['partials/defaultCell.html', 'partials/d
 
 angular.module("partials/defaultCell.html", []).run(["$templateCache", function($templateCache) {
   $templateCache.put("partials/defaultCell.html",
-    "<span>{{row[column.map] | format:column.formatFunction:column.formatParameter}}</span>");
+    "{{formatedValue}}");
 }]);
 
 angular.module("partials/defaultHeader.html", []).run(["$templateCache", function($templateCache) {
@@ -605,7 +610,7 @@ angular.module("partials/defaultHeader.html", []).run(["$templateCache", functio
 angular.module("partials/editableCell.html", []).run(["$templateCache", function($templateCache) {
   $templateCache.put("partials/editableCell.html",
     "<div ng-dblclick=\"toggleEditMode($event)\">\n" +
-    "    <span ng-hide=\"isEditMode\">{{row[column.map] | format:column.formatFunction:column.formatParameter}}</span>\n" +
+    "    <span ng-hide=\"isEditMode\">{{value | format:column.formatFunction:column.formatParameter}}</span>\n" +
     "\n" +
     "    <form ng-submit=\"submit()\" ng-show=\"isEditMode\" name=\"myForm\">\n" +
     "        <input name=\"myInput\" ng-model=\"value\" type=\"type\" input-type/>\n" +
@@ -641,34 +646,34 @@ angular.module("partials/selectionCheckbox.html", []).run(["$templateCache", fun
 
 angular.module("partials/smartTable.html", []).run(["$templateCache", function($templateCache) {
   $templateCache.put("partials/smartTable.html",
-    "<div class=\"smart-table-container\">\n" +
-    "    <table class=\"smart-table\">\n" +
-    "        <thead>\n" +
-    "        <tr class=\"smart-table-global-search-row\" ng-show=\"isGlobalSearchActivated\">\n" +
-    "            <td class=\"smart-table-global-search\" column-span=\"{{columns.length}}\" colspan=\"{{columnSpan}}\">\n" +
-    "            </td>\n" +
-    "        </tr>\n" +
-    "        <tr class=\"smart-table-header-row\">\n" +
-    "            <th ng-repeat=\"column in columns\" ng-include=\"column.headerTemplateUrl\"\n" +
-    "                class=\"smart-table-header-cell {{column.headerClass}}\" scope=\"col\">\n" +
-    "            </th>\n" +
-    "        </tr>\n" +
-    "        </thead>\n" +
-    "        <tbody>\n" +
-    "        <tr ng-repeat=\"dataRow in displayedCollection\" ng-class=\"{selected:dataRow.isSelected}\"\n" +
-    "            class=\"smart-table-data-row\">\n" +
-    "            <td ng-repeat=\"column in columns\" class=\"smart-table-data-cell {{column.cellClass}}\"></td>\n" +
-    "        </tr>\n" +
-    "        </tbody>\n" +
-    "        <tfoot ng-show=\"isPaginationEnabled\">\n" +
-    "        <tr class=\"smart-table-footer-row\">\n" +
-    "            <td colspan=\"{{columns.length}}\">\n" +
-    "                <pagination num-pages=\"numberOfPages\" max-size=\"maxSize\" current-page=\"currentPage\"></pagination>\n" +
-    "            </td>\n" +
-    "        </tr>\n" +
-    "        </tfoot>\n" +
-    "    </table>\n" +
-    "</div>\n" +
+    "<table class=\"smart-table\">\n" +
+    "    <thead>\n" +
+    "    <tr class=\"smart-table-global-search-row\" ng-show=\"isGlobalSearchActivated\">\n" +
+    "        <td class=\"smart-table-global-search\" column-span=\"{{columns.length}}\" colspan=\"{{columnSpan}}\">\n" +
+    "        </td>\n" +
+    "    </tr>\n" +
+    "    <tr class=\"smart-table-header-row\">\n" +
+    "        <th ng-repeat=\"column in columns\" ng-include=\"column.headerTemplateUrl\"\n" +
+    "            class=\"smart-table-header-cell {{column.headerClass}}\" scope=\"col\">\n" +
+    "        </th>\n" +
+    "    </tr>\n" +
+    "    </thead>\n" +
+    "    <tbody>\n" +
+    "    <tr ng-repeat=\"dataRow in displayedCollection\" ng-class=\"{selected:dataRow.isSelected}\"\n" +
+    "        class=\"smart-table-data-row\">\n" +
+    "        <td ng-repeat=\"column in columns\" class=\"smart-table-data-cell {{column.cellClass}}\"></td>\n" +
+    "    </tr>\n" +
+    "    </tbody>\n" +
+    "    <tfoot ng-show=\"isPaginationEnabled\">\n" +
+    "    <tr class=\"smart-table-footer-row\">\n" +
+    "        <td colspan=\"{{columns.length}}\">\n" +
+    "            <div pagination-smart-table=\"\" num-pages=\"numberOfPages\" max-size=\"maxSize\" current-page=\"currentPage\"></div>\n" +
+    "        </td>\n" +
+    "    </tr>\n" +
+    "    </tfoot>\n" +
+    "</table>\n" +
+    "\n" +
+    "\n" +
     "");
 }]);
 
@@ -809,18 +814,18 @@ angular.module("partials/smartTable.html", []).run(["$templateCache", function($
 
 
 (function (angular) {
-    angular.module('ui.bootstrap.pagination', ['smartTable.templateUrlList'])
+    angular.module('ui.bootstrap.pagination.smartTable', ['smartTable.templateUrlList'])
 
         .constant('paginationConfig', {
             boundaryLinks: false,
             directionLinks: true,
             firstText: 'First',
-            previousText: '❰',
-            nextText: '❱',
+            previousText: '<',
+            nextText: '>',
             lastText: 'Last'
         })
 
-        .directive('pagination', ['paginationConfig', 'templateUrlList', function (paginationConfig, templateUrlList) {
+        .directive('paginationSmartTable', ['paginationConfig', 'templateUrlList', function (paginationConfig, templateUrlList) {
             return {
                 restrict: 'EA',
                 require: '^smartTable',
